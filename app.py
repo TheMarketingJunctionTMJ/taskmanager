@@ -1,9 +1,10 @@
 import sqlite3
 from contextlib import closing
 from datetime import datetime, date
+import pandas as pd
 import streamlit as st
 
-APP_TITLE = "TMJ Task Planner"
+APP_TITLE = "TMJ Task Manager"
 DB_PATH = "tmj_tasks.db"
 
 st.set_page_config(page_title=APP_TITLE, page_icon="✅", layout="wide")
@@ -14,12 +15,12 @@ CUSTOM_CSS = """
         background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
     }
     .block-container {
-        padding-top: 1.4rem;
+        padding-top: 1.2rem;
         padding-bottom: 2rem;
-        max-width: 1400px;
+        max-width: 1450px;
     }
     .tmj-card {
-        background: rgba(255,255,255,0.9);
+        background: rgba(255,255,255,0.95);
         border: 1px solid rgba(99,102,241,0.10);
         box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
         border-radius: 20px;
@@ -36,7 +37,7 @@ CUSTOM_CSS = """
     .small-label {
         color: #64748b;
         font-size: 0.85rem;
-        font-weight: 600;
+        font-weight: 700;
         text-transform: uppercase;
         letter-spacing: .04em;
     }
@@ -47,7 +48,7 @@ CUSTOM_CSS = """
         margin-top: 4px;
     }
     .hero {
-        background: linear-gradient(135deg, #111827 0%, #3730a3 60%, #4f46e5 100%);
+        background: linear-gradient(135deg, #111827 0%, #312e81 55%, #4f46e5 100%);
         color: white;
         padding: 28px;
         border-radius: 24px;
@@ -63,6 +64,7 @@ CUSTOM_CSS = """
         margin-right: 6px;
     }
     .pill-high { background:#fee2e2; color:#b91c1c; }
+    .pill-normal { background:#e0e7ff; color:#3730a3; }
     .pill-open { background:#e0f2fe; color:#075985; }
     .pill-done { background:#dcfce7; color:#166534; }
     .pill-pending { background:#fef3c7; color:#92400e; }
@@ -80,6 +82,27 @@ CUSTOM_CSS = """
         margin: 0 auto;
         padding-top: 2.5rem;
     }
+    .section-title {
+        font-size: 1.85rem;
+        font-weight: 800;
+        color: #0f172a;
+        margin-bottom: 2px;
+    }
+    .subtle {
+        color: #64748b;
+        font-size: 0.94rem;
+    }
+    .table-wrap {
+        background: rgba(255,255,255,0.96);
+        border-radius: 18px;
+        border: 1px solid rgba(99,102,241,0.10);
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+        padding: 10px;
+    }
+    .stDataFrame {
+        border-radius: 14px;
+        overflow: hidden;
+    }
 </style>
 """
 
@@ -95,6 +118,7 @@ def get_conn():
 def init_db():
     with closing(get_conn()) as conn:
         cur = conn.cursor()
+
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -106,6 +130,7 @@ def init_db():
             )
             """
         )
+
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS tasks (
@@ -124,6 +149,7 @@ def init_db():
             )
             """
         )
+
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS feedback (
@@ -136,6 +162,7 @@ def init_db():
             )
             """
         )
+
         conn.commit()
 
         users = [
@@ -155,13 +182,13 @@ def init_db():
             seed_tasks = [
                 (
                     "Build task update dashboard",
-                    "Create the main Streamlit dashboard for TMJ Task Planner with login, task list, and filters.",
+                    "Create the main Streamlit dashboard for TMJ Task Manager with login, task list, and filters.",
                     "Professional layout, role-based access, task cards, quick status tracking.",
                     "Ongoing",
                     "High",
                     "Rahim",
                     "Robert",
-                    (date.today()).isoformat(),
+                    date.today().isoformat(),
                     "",
                     now,
                     now,
@@ -174,7 +201,7 @@ def init_db():
                     "Normal",
                     "Rahim",
                     "Robert",
-                    (date.today()).isoformat(),
+                    date.today().isoformat(),
                     "Waiting for confirmation on final fields to track.",
                     now,
                     now,
@@ -190,6 +217,7 @@ def init_db():
                 seed_tasks,
             )
             conn.commit()
+
             cur.execute(
                 "INSERT INTO feedback (task_id, author, comment, created_at) VALUES (1, 'Robert', 'Please keep the dashboard very polished and easy to review.', ?)",
                 (now,),
@@ -214,17 +242,23 @@ def fetch_user(username, password):
 def fetch_tasks(status_filter="All", priority_filter="All", search_text=""):
     query = "SELECT * FROM tasks WHERE 1=1"
     params = []
+
     if status_filter != "All":
         query += " AND status = ?"
         params.append(status_filter)
+
     if priority_filter != "All":
         query += " AND priority = ?"
         params.append(priority_filter)
+
     if search_text.strip():
-        query += " AND (title LIKE ? OR outline LIKE ? OR requirements LIKE ? OR assigned_to LIKE ?)"
+        query += " AND (title LIKE ? OR outline LIKE ? OR requirements LIKE ? OR assigned_to LIKE ? OR created_by LIKE ?)"
         like = f"%{search_text.strip()}%"
-        params.extend([like, like, like, like])
-    query += " ORDER BY CASE priority WHEN 'High' THEN 0 ELSE 1 END, updated_at DESC"
+        params.extend([like, like, like, like, like])
+
+    # Latest added tasks on top
+    query += " ORDER BY datetime(created_at) DESC, id DESC"
+
     with closing(get_conn()) as conn:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -244,7 +278,7 @@ def fetch_feedback(task_id):
     with closing(get_conn()) as conn:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("SELECT * FROM feedback WHERE task_id = ? ORDER BY created_at DESC", (task_id,))
+        cur.execute("SELECT * FROM feedback WHERE task_id = ? ORDER BY datetime(created_at) DESC, id DESC", (task_id,))
         return cur.fetchall()
 
 
@@ -278,7 +312,10 @@ def update_task(task_id, status, priority, expected_completion, blocker_reason, 
                 assigned_to = ?, expected_completion = ?, blocker_reason = ?, updated_at = ?
             WHERE id = ?
             """,
-            (title, outline, requirements, status, priority, assigned_to, expected_completion, blocker_reason, now, task_id),
+            (
+                title, outline, requirements, status, priority,
+                assigned_to, expected_completion, blocker_reason, now, task_id
+            ),
         )
         conn.commit()
 
@@ -304,7 +341,25 @@ def metrics(tasks):
 
 
 def render_metric(label, value):
-    st.markdown(f"<div class='metric-card'><div class='small-label'>{label}</div><div class='big-number'>{value}</div></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='metric-card'><div class='small-label'>{label}</div><div class='big-number'>{value}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def status_badge(status):
+    status_class = {
+        "Ongoing": "pill-open",
+        "Pending": "pill-pending",
+        "Complete": "pill-done",
+    }.get(status, "pill-open")
+    return f"<span class='pill {status_class}'>{status}</span>"
+
+
+def priority_badge(priority):
+    if priority == "High":
+        return "<span class='pill pill-high'>High</span>"
+    return "<span class='pill pill-normal'>Normal</span>"
 
 
 def login_screen():
@@ -313,13 +368,14 @@ def login_screen():
     st.markdown(
         f"""
         <div class='hero'>
-            <div style='font-size:0.9rem; opacity:0.88;'>TMJ Productivity Suite</div>
-            <div style='font-size:2rem; font-weight:800; margin-top:6px;'>{APP_TITLE}</div>
-            <div style='margin-top:8px; opacity:0.9;'>A clean and professional task planning workspace for Robert and Rahim.</div>
+            <div style='font-size:0.95rem; opacity:0.88;'>TMJ Productivity Suite</div>
+            <div style='font-size:2.15rem; font-weight:800; margin-top:6px;'>{APP_TITLE}</div>
+            <div style='margin-top:8px; opacity:0.92;'>A polished task planning workspace for Robert and Rahim.</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
     with st.form("login_form"):
         st.subheader("Sign in")
         username = st.text_input("Username")
@@ -333,29 +389,76 @@ def login_screen():
                     "full_name": user[1],
                     "role": user[2],
                 }
+                st.session_state.page = "dashboard"
                 st.rerun()
             else:
                 st.error("Invalid username or password.")
-    st.info("Available users: Robert and Rahim")
+
+    st.info("Available users: robert / robert123 and rahim / rahim123")
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def main_app():
-    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
-    user = st.session_state.user
+def render_sidebar(user):
+    with st.sidebar:
+        st.header("Filters")
+        status_filter = st.selectbox("Status", ["All"] + STATUS_OPTIONS)
+        priority_filter = st.selectbox("Priority", ["All"] + PRIORITY_OPTIONS)
+        search_text = st.text_input("Search")
+        st.divider()
 
+        st.subheader("Create New Task")
+        with st.form("create_task_form", clear_on_submit=True):
+            title = st.text_input("Task title")
+            outline = st.text_area("Task outline", height=90)
+            requirements = st.text_area("Requirements / details", height=110)
+
+            col1, col2 = st.columns(2)
+            with col1:
+                status = st.selectbox("Initial status", STATUS_OPTIONS, index=0)
+                assigned_to = st.selectbox("Assigned to", ["Rahim", "Robert"], index=0)
+            with col2:
+                priority = st.selectbox("Priority level", PRIORITY_OPTIONS, index=0)
+                expected_completion = st.date_input("Expected completion", value=date.today())
+
+            blocker_reason = st.text_area("Blocker / pending reason", height=80)
+
+            create = st.form_submit_button("Add Task", use_container_width=True)
+            if create:
+                if not title.strip():
+                    st.error("Task title is required.")
+                else:
+                    add_task(
+                        title.strip(),
+                        outline.strip(),
+                        requirements.strip(),
+                        assigned_to,
+                        user["full_name"],
+                        status,
+                        priority,
+                        str(expected_completion),
+                        blocker_reason.strip(),
+                    )
+                    st.success("Task created successfully.")
+                    st.rerun()
+
+    return status_filter, priority_filter, search_text
+
+
+def render_topbar(user):
     top1, top2 = st.columns([5, 1])
+
     with top1:
         st.markdown(
             f"""
             <div class='hero'>
                 <div style='display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap;'>
                     <div>
-                        <div style='font-size:0.9rem; opacity:0.88;'>Welcome back</div>
-                        <div style='font-size:2rem; font-weight:800; margin-top:4px;'>{user['full_name']}</div>
+                        <div style='font-size:0.95rem; opacity:0.88;'>Welcome back</div>
+                        <div style='font-size:2.15rem; font-weight:800; margin-top:4px;'>{user['full_name']}</div>
+                        <div style='margin-top:10px; opacity:0.94; font-size:1rem;'>{APP_TITLE}</div>
                         <div style='margin-top:8px; opacity:0.92;'>Track task progress, update blockers, manage deadlines, and keep feedback in one place.</div>
                     </div>
-                    <div style='background:rgba(255,255,255,0.12); padding:14px 18px; border-radius:16px; min-width:220px;'>
+                    <div style='background:rgba(255,255,255,0.12); padding:14px 18px; border-radius:16px; min-width:240px;'>
                         <div style='font-size:0.82rem; opacity:0.85;'>Role</div>
                         <div style='font-size:1.15rem; font-weight:700; margin-top:4px;'>{ROLE_DISPLAY[user['role']]}</div>
                     </div>
@@ -364,44 +467,17 @@ def main_app():
             """,
             unsafe_allow_html=True,
         )
+
     with top2:
         st.write("")
         if st.button("Logout", use_container_width=True):
             st.session_state.pop("user", None)
+            st.session_state.pop("page", None)
+            st.session_state.pop("selected_task_id", None)
             st.rerun()
 
-    with st.sidebar:
-        st.header("Filters")
-        status_filter = st.selectbox("Status", ["All"] + STATUS_OPTIONS)
-        priority_filter = st.selectbox("Priority", ["All"] + PRIORITY_OPTIONS)
-        search_text = st.text_input("Search")
-        st.divider()
-        st.subheader("Create New Task")
-        with st.form("create_task_form", clear_on_submit=True):
-            title = st.text_input("Task title")
-            outline = st.text_area("Task outline", height=90)
-            requirements = st.text_area("Requirements / details", height=110)
-            col1, col2 = st.columns(2)
-            with col1:
-                status = st.selectbox("Initial status", STATUS_OPTIONS, index=0)
-                assigned_to = st.selectbox("Assigned to", ["Rahim", "Robert"], index=0)
-            with col2:
-                priority = st.selectbox("Priority level", PRIORITY_OPTIONS, index=0)
-                expected_completion = st.date_input("Expected completion", value=date.today())
-            blocker_reason = st.text_area("Blocker / pending reason", height=80)
-            create = st.form_submit_button("Add Task", use_container_width=True)
-            if create:
-                if not title.strip():
-                    st.error("Task title is required.")
-                else:
-                    add_task(
-                        title.strip(), outline.strip(), requirements.strip(), assigned_to,
-                        user["full_name"], status, priority, str(expected_completion), blocker_reason.strip()
-                    )
-                    st.success("Task created successfully.")
-                    st.rerun()
 
-    tasks = fetch_tasks(status_filter, priority_filter, search_text)
+def render_dashboard(tasks, user):
     total, ongoing, pending, completed, high = metrics(tasks)
     m1, m2, m3, m4, m5 = st.columns(5)
     with m1:
@@ -416,12 +492,25 @@ def main_app():
         render_metric("High Priority", high)
 
     st.write("")
+    nav1, nav2, _ = st.columns([1.2, 1.2, 4])
+    with nav1:
+        if st.button("📋 View All Tasks", use_container_width=True):
+            st.session_state.page = "all_tasks"
+            st.rerun()
+    with nav2:
+        if st.button("🏠 Dashboard", use_container_width=True):
+            st.session_state.page = "dashboard"
+            st.rerun()
+
+    st.write("")
     left, right = st.columns([1.08, 1])
 
     with left:
         st.subheader("Task Board")
+        st.caption("Newest tasks appear first.")
         if not tasks:
             st.info("No tasks match the selected filters.")
+
         for task in tasks:
             due = task["expected_completion"] or "—"
             priority_html = "<span class='pill pill-high'>High Priority</span>" if task["priority"] == "High" else ""
@@ -430,6 +519,7 @@ def main_app():
                 "Pending": "pill-pending",
                 "Complete": "pill-done",
             }[task["status"]]
+
             st.markdown(
                 f"""
                 <div class='tmj-card'>
@@ -438,6 +528,7 @@ def main_app():
                             <div class='task-title'>#{task['id']} · {task['title']}</div>
                             <div class='muted' style='margin-top:6px;'>Assigned to: <b>{task['assigned_to']}</b> &nbsp;•&nbsp; Created by: <b>{task['created_by']}</b></div>
                             <div class='muted' style='margin-top:6px;'>Expected completion: <b>{due}</b></div>
+                            <div class='muted' style='margin-top:6px;'>Created: <b>{task['created_at']}</b></div>
                         </div>
                         <div>{priority_html}<span class='pill {status_class}'>{task['status']}</span></div>
                     </div>
@@ -446,16 +537,20 @@ def main_app():
                 """,
                 unsafe_allow_html=True,
             )
+
             if st.button(f"Open Task #{task['id']}", key=f"open_{task['id']}", use_container_width=True):
                 st.session_state.selected_task_id = task["id"]
+                st.session_state.page = "dashboard"
                 st.rerun()
 
     with right:
         st.subheader("Task Details")
         selected_task_id = st.session_state.get("selected_task_id")
+
         if not selected_task_id and tasks:
             selected_task_id = tasks[0]["id"]
             st.session_state.selected_task_id = selected_task_id
+
         if not selected_task_id:
             st.info("Select a task to view full details and update it.")
             return
@@ -468,10 +563,12 @@ def main_app():
         st.markdown("<div class='tmj-card'>", unsafe_allow_html=True)
         st.markdown(f"### #{task['id']} · {task['title']}")
         st.caption(f"Assigned to {task['assigned_to']} • Created by {task['created_by']} • Last updated {task['updated_at']}")
+
         with st.form(f"edit_task_{task['id']}"):
             title = st.text_input("Task title", value=task["title"])
             outline = st.text_area("Outline", value=task["outline"] or "", height=100)
             requirements = st.text_area("Requirements / Details", value=task["requirements"] or "", height=120)
+
             c1, c2 = st.columns(2)
             with c1:
                 status = st.selectbox("Status", STATUS_OPTIONS, index=STATUS_OPTIONS.index(task["status"]))
@@ -480,15 +577,25 @@ def main_app():
                 priority = st.selectbox("Priority", PRIORITY_OPTIONS, index=PRIORITY_OPTIONS.index(task["priority"]))
                 initial_date = date.fromisoformat(task["expected_completion"]) if task["expected_completion"] else date.today()
                 expected_completion = st.date_input("Expected completion", value=initial_date)
+
             blocker_reason = st.text_area("Pending reason / blocker", value=task["blocker_reason"] or "", height=90)
+
             save = st.form_submit_button("Save Task Updates", use_container_width=True)
             if save:
                 update_task(
-                    task["id"], status, priority, str(expected_completion), blocker_reason.strip(),
-                    title.strip(), outline.strip(), requirements.strip(), assigned_to
+                    task["id"],
+                    status,
+                    priority,
+                    str(expected_completion),
+                    blocker_reason.strip(),
+                    title.strip(),
+                    outline.strip(),
+                    requirements.strip(),
+                    assigned_to,
                 )
                 st.success("Task updated.")
                 st.rerun()
+
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("<div class='tmj-card'>", unsafe_allow_html=True)
@@ -520,6 +627,79 @@ def main_app():
                     unsafe_allow_html=True,
                 )
         st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_all_tasks_page(tasks):
+    st.markdown("<div class='section-title'>All Tasks</div>", unsafe_allow_html=True)
+    st.markdown("<div class='subtle'>Every task in one single-row table view. Newest tasks appear first.</div>", unsafe_allow_html=True)
+    st.write("")
+
+    top_a, top_b, _ = st.columns([1.3, 1.1, 5])
+    with top_a:
+        if st.button("⬅ Back to Dashboard", use_container_width=True):
+            st.session_state.page = "dashboard"
+            st.rerun()
+    with top_b:
+        if st.button("🔄 Refresh Tasks", use_container_width=True):
+            st.rerun()
+
+    if not tasks:
+        st.info("No tasks available.")
+        return
+
+    rows = []
+    for task in tasks:
+        rows.append({
+            "ID": task["id"],
+            "Title": task["title"],
+            "Status": task["status"],
+            "Priority": task["priority"],
+            "Assigned To": task["assigned_to"],
+            "Created By": task["created_by"],
+            "Deadline": task["expected_completion"] or "",
+            "Blocker Reason": task["blocker_reason"] or "",
+            "Created At": task["created_at"],
+            "Updated At": task["updated_at"],
+        })
+
+    df = pd.DataFrame(rows)
+
+    st.markdown("<div class='table-wrap'>", unsafe_allow_html=True)
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        height=520
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.write("")
+    st.markdown("### Open a Task")
+    task_ids = [t["id"] for t in tasks]
+    selected_id = st.selectbox("Select task ID to open details", task_ids)
+
+    if st.button("Open Selected Task", use_container_width=True):
+        st.session_state.selected_task_id = selected_id
+        st.session_state.page = "dashboard"
+        st.rerun()
+
+
+def main_app():
+    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+    user = st.session_state.user
+    if "page" not in st.session_state:
+        st.session_state.page = "dashboard"
+
+    render_topbar(user)
+    status_filter, priority_filter, search_text = render_sidebar(user)
+
+    tasks = fetch_tasks(status_filter, priority_filter, search_text)
+
+    if st.session_state.page == "all_tasks":
+        render_all_tasks_page(tasks)
+    else:
+        render_dashboard(tasks, user)
 
 
 def main():
